@@ -1,2 +1,2 @@
 # series-temporais-resultado-primario-em-R
-Dataset and Rmarkdown
+Aplicando algumas técnicas de séries temporais construo neste pequeno projeto duas médias móveis para o resultado primário do Governo Brasileiro. Para tanto, utilizo uma base de dados contendo algumas variáveis fiscais retiradas do repositório do Banco Central. Além do cálculo e plotagem das médias móveis, analiso os pressupostos básicos de uma série temporal: estacionariedade e autocorrelação, além da decomposição para análises complementares de sazonalidade e tendência dos dados. Neste projeto utilizo a linguagem R para para tratar os dados originais, aplicar os testes estatísticos e fazer a plotagem dos gráficos.
