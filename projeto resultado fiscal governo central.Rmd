@@ -1,0 +1,251 @@
+---
+title: Series temporais e médias móveis aplicados ao resultado primário do Governo
+  Brasileiro
+author: "Adauto de Galiza"
+date: "17/08/2022"
+output: html_document
+---
+
+### Objetivo: Utilizando os dados fiscais do governo brasileiro iremos construir duas médias móveis (7 e 20 dias) para o resultado primário do governo
+
+Bibliotecas a serem utilizadas:
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(rmarkdown)
+library(forecast)
+library(ggthemes)
+options(scipen = 999)
+```
+
+```{r include=FALSE}
+setwd("C:/Users/Adauto/OneDrive/Área de Trabalho/Ciencia de Dados/Series temporaris com redes neurais UDEMY")
+primario <- readxl::read_xlsx("serie-historica.xlsx")
+```
+
+Sobre o dataset: os dados foram colhidos na página do Banco Central no formato .xlxs e possuem informações sobre Receita Liquida, Despesa Total, Resultado Primário e Resultado nominal do Governo Central. A estrutura dos dados é a seguinte
+```{r}
+paged_table(primario)
+```
+
+
+Pré-tratamento dos dados
+```{r}
+## Renomeando colunas com rename()
+
+primario_tratado <- primario %>%
+  rename(c(resultado_primario = `RESULTADO PRIMÁRIO DO GOVERNO CENTRAL (R$ MILHÕES) - VALORES CORRENTES`),
+         resultado_nominal = `RESULTADO NOMINAL DO GOVERNO CENTRAL (R$ MILHÕES) - VALORES CORRENTES`)
+paged_table(head(primario_tratado))
+```
+
+```{r}
+## Também podemos renomear colunas com comando colnames()
+
+colnames(primario_tratado)[1] <- "mes"
+colnames(primario_tratado)[2] <- "ano"
+colnames(primario_tratado)[3] <- "arrecadacao"
+colnames(primario_tratado)[4] <- "receita_liquida"
+colnames(primario_tratado)[5] <- "despesa_total"
+colnames(primario_tratado)[1] <- "mes"
+colnames(primario_tratado)[8] <- "divida_buta_pct"
+paged_table(head(primario_tratado))
+
+```
+
+Verificando tipagem dos dados
+```{r}
+str(primario_tratado)
+
+## Não será necessário reclassificar tipagem dos dados para nosso propósito
+```
+Verificando existência de NA's nos dados de interesse
+```{r}
+
+missing_values = sum(is.na(primario_tratado$resultado_primario))
+missing_values
+```
+
+Verificando os dados de `resultado_primario` visualmente
+
+```{r}
+primario_tratado %>%
+  ggplot() + 
+  geom_col(aes(x = mes, y = resultado_primario), fill = "#1c9099", size = 0.5) +
+  labs(title = "Evolução do Resultado Primário do Governo Central (2000-20)") +
+  xlab(" ") +
+  ylab("Resultado") +
+  theme_minimal()
+```
+
+Selecionando dado de interesse
+
+```{r}
+## Para construir as médias móveis precisamos de um objeto do tipo time series
+## Logo, filtramos do dataset original apenas a coluna que contém os dados do resultado primário
+
+dados_serie <- primario_tratado %>%
+  select(resultado_primario)
+```
+
+Transformando em time-series para `resultado_primario`
+```{r}
+
+serie_primario <- ts(dados_serie, start = c(1997,1), end = c(2022,1), frequency = 12)
+plot(serie_primario)
+
+## O prâmetro frequency = 12 faz com que o R retorne uma série temporal mensal com as datas de inicio e fim especificadas em start e end
+```
+
+
+### Verificando pressupostos da série temporal
+
+Teste de estacionariedade: uma série temporal considerada estacionária é aquela em que a média das observações é relativamente constante no tempo
+```{r message=FALSE, warning=FALSE}
+library(urca)
+```
+
+Teste KPSS: teste estatístico que verifica o pressuposto de estacionariedade 
+```{r}
+## Ho = não há estacionariedade : valor do teste > valor crítico (5%)
+## Ha = existe estacionariedade : valor do teste < valor crítico (5%)
+
+teste_kpss <- ur.kpss(serie_primario) 
+summary(teste_kpss)
+
+## Resultado: serie não-estacionária
+## valor do teste resultou em 1,05 (maior que 0,46% com 5% de significância)
+```
+
+
+Teste PP (Philliops-Perron): também verifica o pressuposto de estacionariedade, mas usando p-valor.
+```{r}
+## Ho = existe estacionariedade : p-valor > 0,05
+## Ha = não há estacionariedade : p-valor < 0,05
+
+teste_pp <- ur.pp(serie_primario) 
+summary(teste_pp)
+
+## Resultado: serie não-estacionária por este teste também
+
+## Como poderíamos esperar de uma variável econômica fortemente influenciada por fatores políticos, a média do resultado primário não é constante ao longo do tempo
+```
+Observação! 
+
+1. Quando o objetivo é realizar **previsões** com séries temporais é essencial:
+
+i. Que a ST seja estácionária
+
+ii. Que a ST não tenha autocorrelação
+
+2. O objetivo aqui não é fazer previsões, mas criar médias móveis e, portanto, estes presupostos não são tão definitivos. Ainda assim, iremos analisá-los para extrair outros insghts.
+
+
+Testes de autocorrelação: este pressuposto serve para identificar se a série é aleatória ou se está sob influência de alguma sazionalidade ou de uma tendência no tempo
+```{r}
+## Via correlogramas
+
+ggAcf(serie_primario)  
+ggPacf(serie_primario)
+
+
+## Linhas azuis = intervalo de confiaça.
+## Lags acima ou abaixo indicam influência sazional ou de tendência (autocorrelçaõ != 0)
+## Lags dentro do IC indicam que não existe a série é aleatória (autocorrelação = 0). 
+
+## Interpretação: como existem lags fora do intervalo de confiança a autocorrelação entre os períodos não é zero e nossa série não é aleatória, sofrendo de influência de sazionalidade ou de tendência
+```
+
+
+Via teste Ljung-Box: teste estatístico para avaliar autocorrelação
+```{r}
+## Ho = não existe autocorrelação : p > 0,05
+## Ha = existe autocorrelação entre os lags : p <= 0,05
+
+Box.test(serie_primario, type = "Ljung") 
+
+## Interpretação: há autocorrelação dos dados, reforçando que a série não é aleatória
+```
+
+
+### Decomposição da Série Temporal
+
+Os testes de autocorrelação não indicam qual a influência que uma série não-aleatória está sofrendo. Esta é tarefa da decomnposição que mostra se temos sazionalidade, tendência ou ambas interferindo nos dados.
+
+```{r}
+serie_primario <- ts(dados_serie, start = c(1997,1), end = c(2022,1), frequency = 12)
+plot(serie_primario)
+
+decomposicao_primario1 <- decompose(serie_primario) # Serie aditiva
+plot(decomposicao_primario1, col = "dark blue")  
+
+decomposicao_primario2 <- decompose(serie_primario, type = "mult") # Serie Multiplicativa
+plot(decomposicao_primario2, col = "brown")
+
+## Interpretando:
+## 1. O primeiro quadro indica os dados observados
+## 2. O segundo mostra efeito de uma têndecia (crescente ou decrescente no tempo)
+## 3. O terceiro quadro apota a existência de sazionalidade 
+## 4. O últomo mostra os resíduos, ou seja, aquilo que não é explicado pelos demais componente.
+## 5. Podemos ver que existe uma clara sazonalidade nos dados e uma tímida tendência de queda pós-2015 no resultado primário
+```
+
+
+  
+
+### Calculo e plotagem das médias móveis de 7 e 20 dias
+```{r}
+## Construindo média móvel de 7 dias para resultado primário
+
+media_movel7 <- ma(serie_primario, order = 7, centre = FALSE) #Center = TRUE somente se for por dias pares
+plot(media_movel7)
+```
+
+```{r}
+## Construindo média móvel de 7 dias para resultado primário
+
+media_movel20 <- ma(serie_primario, order = 20, centre = TRUE)
+plot(media_movel20)
+```
+
+Comparando as duas médias 
+```{r warning=FALSE}
+g1 <- primario_tratado %>% 
+  ggplot(aes(x= mes, y = resultado_primario)) +
+  geom_line(aes(y=media_movel7), col = "#fc9272", size = 1) +
+  geom_line(aes(y=media_movel20), col = "#1c9099", size = 1) +
+  theme_bw() +
+  labs(title = "Comparação das médias móveis de 7 e 20 dias do Resultado Primário do Governo (1997-2021)") +
+  theme(plot.title = element_text(size = 10))+
+  xlab(" ") +
+  ylab("Resultado Primário (Milhoes/R$)") 
+  plot(g1)
+
+```
+
+
+Comparando as médias móveis com os dados originais
+```{r message=FALSE, warning=FALSE}
+g2 <- primario_tratado %>% 
+  ggplot(aes(x= mes, y = resultado_primario)) +
+  geom_line(aes(y=media_movel7), col = "#fc9272", size = 1) +
+  geom_line(aes(y=media_movel20), col = "#1c9099", size = 1) +
+  geom_col(aes(x = mes, y = resultado_primario), col = "#636363", fill = "#636363", alpha = 0.5, width = 0.2) +
+  theme_bw() +
+  labs(title = "Comparação das médias móveis com os dados do Resultado Primário do Governo (1997-2021)") +
+  theme(plot.title = element_text(size = 10))+
+  xlab(" ") +
+  ylab("Resultado Primário (Milhoes/R$)")
+plot(g2)
+```
+
+### Conclusões:
+1. Médias móveis mais "curtas" sentem mais as variações nos dados
+
+2. Médias móveis mais "longas" suavizam mais a variabilidade da série temporal
+
+3. Em ambas as médias é possivel visualizar a conhecida deterioração das contas públicas pós-2015, período em que as contas do governo começaram a apresentar déficits primários de forma sistemática.
+
+4. As médias móveis são indicadores que "suavizam" a variação dos dados. No caso apresentado, os dados possuem uma forte dinâmica sazonal e não apresentam uma tendência muito forte após decomposição da série, o que torna interessante analisar os dados pela técnica das médias móveis.
+
